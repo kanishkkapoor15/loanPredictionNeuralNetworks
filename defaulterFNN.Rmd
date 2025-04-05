@@ -1,0 +1,324 @@
+---
+title: "defaulterPredictionCNN"
+author: "Kanishk Kapoor"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+
+
+install.packages("tensorflow")
+install.packages("keras")
+
+```
+
+```{r}
+library("dplyr")
+library(tensorflow)
+library(keras)
+
+```
+
+
+```{r}
+l_data <- read.csv("bankloans.csv", stringsAsFactors = FALSE)
+```
+
+```{r}
+#normalize numeric features
+
+scale_data <- function(x) {
+  return((x - min(x)) / (max(x) - min(x)))
+}
+
+
+numerical_features <- c("age", "ed", "employ" , "address", "income", "debtinc", "creddebt", "othdebt")
+
+```
+
+```{r}
+
+l_data[numerical_features] <- lapply(l_data[numerical_features], scale_data)
+
+l_data$default <- as.factor(l_data$default)
+```
+
+In machine learning:
+	•	Inputs (X) go into the model to make predictions.
+	•	Outputs (y) are the true values used to calculate the error (loss).
+
+Think of it like teaching:
+	•	x_train: Homework questions
+	•	y_train: Correct answers
+	•	Model: Student trying to learn the pattern
+	•	x_test: Exam questions
+	•	y_test: Exam answer key (to grade performance)
+
+```{r}
+#TRAIN TEST SPLIT
+l_data$default <- as.numeric(l_data$default == 1)
+
+set.seed(123)
+train_idx <- sample(1:nrow(l_data), 0.8 * nrow(l_data))
+train_data <- l_data[train_idx, ]
+test_data <- l_data[-train_idx, ]
+
+# Convert to matrices for Keras
+x_train <- as.matrix(train_data[, -9])  # Features
+y_train <- as.matrix(as.numeric(train_data$default))  # Target
+x_test <- as.matrix(test_data[, -9])
+y_test <- as.matrix(as.numeric(test_data$default))
+
+# Assuming x_train and y_train are matrices or data frames
+valid_indices <- which(!is.na(y_train))
+x_train_clean <- x_train[valid_indices, ]
+y_train_clean <- y_train[valid_indices]
+
+
+```
+```{r}
+valid_test_indices <- which(!is.na(y_test))
+x_test_clean <- x_test[valid_test_indices, ]
+y_test_clean <- y_test[valid_test_indices]
+```
+
+
+
+ Model Architecture (a Sequential Model):
+
+model <- keras_model_sequential() %>%
+  layer_dense(units = 16, activation = "relu", input_shape = c(ncol(x_train))) %>%
+  layer_dense(units = 8, activation = "relu") %>%
+  layer_dense(units = 1, activation = "sigmoid")
+
+This is a 3-layer feedforward neural network, used for binary classification (predicting loan default or not).
+
+⸻
+
+ 1. layer_dense(units = 16, activation = "relu", input_shape = c(ncol(x_train)))
+
+ What’s happening here?
+	•	This is the first hidden layer.
+	•	Input: Each training example has multiple features (equal to the number of columns in x_train, like age, income, etc.).
+	•	Neurons: 16 neurons in this layer.
+	•	Each neuron: takes in the input features → performs a weighted sum → adds a bias → passes it through the ReLU activation function.
+
+ ReLU Activation Function:
+
+ReLU(x) = max(0, x)
+
+	•	Removes negative values.
+	•	Adds non-linearity — helps the model learn complex patterns like “high income but high debt still causes default”.
+
+⸻
+
+2. layer_dense(units = 8, activation = "relu")
+
+ What’s happening here?
+	•	This is the second hidden layer.
+	•	It takes the output from the first hidden layer (16 values per sample), then:
+	•	Multiplies them by weights
+	•	Adds biases
+	•	Applies ReLU again
+	•	8 neurons = a further dimensionality reduction, learning even more abstract patterns from the previous layer.
+
+💡 Think of this like moving from raw inputs → intermediate ideas → refined signals.
+
+⸻
+
+ 3. layer_dense(units = 1, activation = "sigmoid")
+
+ Final output layer:
+	•	1 neuron → outputs a single value between 0 and 1.
+	•	That’s because of the sigmoid activation:
+
+Sigmoid(x) = 1 / (1 + e^(-x))
+
+	•	This turns the model’s final prediction into a probability — how likely the user is to default on a loan.
+	•	Closer to 1 → likely to default
+	•	Closer to 0 → likely to repay
+
+⸻
+
+ In Summary:
+
+Layer	Units	Activation	Purpose
+Input Layer	–	–	Feeds data to the model (x_train)
+Hidden Layer 1	16	ReLU	Learns basic features and interactions
+Hidden Layer 2	8	ReLU	Learns deeper, refined patterns
+Output Layer	1	Sigmoid	Predicts probability of default (0 to 1)
+
+
+
+⸻
+
+ How it works on x_train:
+
+During training:
+	1.	Each training example flows through all 3 layers (forward pass).
+	2.	Output is compared to y_train (true labels).
+	3.	The model calculates loss (error) and updates weights using backpropagation.
+
+
+```{r}
+#fnn MODEL
+
+
+model <- keras_model_sequential() %>%
+  layer_dense(units = 16, activation = "relu", input_shape = c(ncol(x_train_clean))) %>%
+  layer_dense(units = 8, activation = "relu") %>%
+  layer_dense(units = 1, activation = "sigmoid")
+
+```
+
+```{r}
+summary(model)
+```
+
+```{r}
+
+
+# Compile Model
+model %>% compile(
+  optimizer = optimizer_adam(),
+  loss = loss_binary_crossentropy(),
+  metrics = c("accuracy")
+)
+
+```
+```{r}
+sum(is.na(x_train_clean))  # should be 0
+sum(is.infinite(x_train_clean))  # should be 0
+sum(is.na(y_train_clean))  # should be 0
+sum(is.infinite(y_train_clean))  # should be 0
+```
+
+```{r}
+# Train Model
+history <- model %>% fit(
+  x_train_clean, y_train_clean,
+  epochs = 50,
+  batch_size = 10,
+  validation_split = 0.2
+)
+
+```
+```{r}
+# Evaluate Model
+model %>% evaluate(x_test_clean, y_test_clean)
+```
+
+An accuracy of ~84.9% on the test set is pretty solid — especially considering that training accuracy was ~83.7% and validation accuracy was ~83.2%. Your model is:
+	•	Not overfitting — no huge gap between training, validation, and test accuracy.
+	•	Generalizing well — it performs slightly better on the test set than expected!
+	
+```{r}
+library(caret)
+
+pred_probs <- model %>% predict(x_test_clean)
+pred_class <- ifelse(pred_probs > 0.5, 1, 0)
+
+confusionMatrix(
+  factor(pred_class), 
+  factor(y_test_clean),
+  positive = "1"
+)
+```
+
+```{r}
+library(pROC)
+
+roc_obj <- roc(y_test_clean, pred_probs)
+plot(roc_obj, col = "blue", main = "ROC Curve")
+auc(roc_obj)
+```
+AUC closer to 1 = better model. 0.85+ is very good!
+```{r}
+# Plot example
+hist(pred_probs, breaks = 20, col = 'steelblue',
+     main = "Distribution of Predicted Default Probabilities",
+     xlab = "Predicted Probability of Default")
+```
+```{r}
+# Convert matrix to data frame and assign column names
+x_test_df <- as.data.frame(x_test_clean)
+colnames(x_test_df) <- colnames(x_train)  # assuming same structure
+```
+
+```{r}
+predicted_probs <- as.vector(pred_probs)
+predicted_class <- ifelse(predicted_probs > 0.5, "Flag for Review", "Approve")
+
+library(dplyr)
+library(tibble)
+
+predictions_table <- x_test_df %>%
+  mutate(
+    Actual_Default = y_test_clean,
+    Predicted_Probability = round(predicted_probs, 3),
+    Decision = predicted_class
+  )
+```
+
+```{r}
+# Show top 10 customers with highest default risk
+predictions_table %>%
+  arrange(desc(Predicted_Probability)) %>%
+  head(10)
+```
+
+```{r}
+library(ggplot2)
+
+ggplot(predictions_table, aes(x = Predicted_Probability, fill = Decision)) +
+  geom_histogram(binwidth = 0.05, color = "black", alpha = 0.7) +
+  labs(title = "Predicted Default Probability Distribution",
+       x = "Probability of Default", y = "Number of Customers") +
+  theme_minimal()
+```
+```{r}
+
+library(caret)  # for confusionMatrix
+library(vip)    # optional, for plotting
+
+# Baseline accuracy on test set
+baseline <- model %>% evaluate(x_test_clean, y_test_clean)
+baseline_acc <- baseline["accuracy"]
+
+# Data frame to store drops in accuracy
+importance <- data.frame(Feature = character(), Accuracy_Drop = numeric())
+
+# Loop over each feature
+for (i in 1:ncol(x_test_clean)) {
+  x_temp <- x_test_clean
+  x_temp[, i] <- sample(x_temp[, i])  # shuffle the i-th column
+  
+  # Predict with shuffled feature
+  temp_acc <- model %>% evaluate(x_temp, y_test_clean, verbose = 0)
+  acc_drop <- baseline_acc - temp_acc["accuracy"]
+  
+  importance <- rbind(importance, data.frame(
+    Feature = colnames(x_test_clean)[i],
+    Accuracy_Drop = acc_drop
+  ))
+}
+
+# Sort by most important
+importance <- importance %>% arrange(desc(Accuracy_Drop))
+```
+
+```{r}
+# Plot
+ggplot(importance, aes(x = reorder(Feature, Accuracy_Drop), y = Accuracy_Drop)) +
+  geom_col(fill = "maroon") +
+  coord_flip() +
+  labs(title = "Feature Importance (Permutation Method)",
+       x = "Feature", y = "Drop in Accuracy when Shuffled") +
+  theme_minimal()
+```
+
